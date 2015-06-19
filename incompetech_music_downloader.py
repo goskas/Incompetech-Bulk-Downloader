@@ -5,6 +5,20 @@ import yaml
 
 url = 'http://incompetech.com/music/royalty-free/index.html?isrc=USUAN1500038&Search=Search'
 
+def mm_ss_to_s(duration):
+    """
+    Duration in shape "[m]m:ss"
+    Examples:
+    0:12
+    1:00
+    12:21
+
+    converts it to seconds.
+    """
+    d = list(map(int, duration.split(':')))
+    s = d[0] * 60 + d[1]
+    return s
+
 def size_to_units(size):
     '''
     Copied from PlaylistDuration/upload.py on 7th June 2015.
@@ -25,14 +39,11 @@ def units_to_size(units):
     if 'T' in units: stevilka *= 1024**4
     return stevilka
 
-def do_I_already_have_it(songname):
-    return False
-
 def get_mp3_from_url(url, folder, converse=True):
     """
     Results are saved in folder folder.
     folder must end with / or \\.
-    Relativa and absolute paths accepted
+    Relative and absolute paths accepted
     """
     prefix = 'http://incompetech.com'
     split_by = '/music/royalty-free/mp3-royaltyfree/'
@@ -41,8 +52,8 @@ def get_mp3_from_url(url, folder, converse=True):
     except Exception as e:
         print(e, 'while doing', url)
         return -1
-    splited = webpage.split(split_by)[1]
-    extracted = splited.split('>')[0].strip('"')
+    splitted = webpage.split(split_by)[1]
+    extracted = splitted.split('>')[0].strip('"')
     prettier_name = urlreq.unquote(extracted)
     mp3 = prefix + \
           middle + \
@@ -79,7 +90,7 @@ def get_all_songs():
 def download_all_songs(folder):
     already_have_data = 'what_I_have.yaml'
     urls, IDs, names = get_all_songs()
-    f = open(already_have_data)
+    f = open(already_have_data, 'r')
     already_have = yaml.load(f.read())
     f.close()
     if already_have is None: 
@@ -89,7 +100,20 @@ def download_all_songs(folder):
         if ID in IDset:
             print(ID, 'already in IDset')
         IDset.add(ID)
-        if ID in already_have: continue
+        if ID in already_have:
+            # This (next) if adds additional data
+            # to previously downloaded songs.
+            if 'Instruments' not in already_have[ID]:
+                additional = get_additional_details(url)
+                for i, j in additional.items():
+                    already_have[ID][i] = j
+                f = open(already_have_data, 'w')
+                f.write(yaml.dump(already_have, default_flow_style=False))
+                f.close()
+                print('Added data to', already_have[ID]['name'])
+            
+            continue
+        
         size = get_mp3_from_url(url, folder)
         if size < 0:
             print("Couldn't download", url, ID, name, '.')
@@ -100,6 +124,9 @@ def download_all_songs(folder):
             size= size,
             URL= url,
             name= name)
+        additional = get_additional_details(url)
+        for i, j in additional.items():
+            already_have[ID][i] = j        
         f = open(already_have_data, 'w')
         f.write(yaml.dump(already_have, default_flow_style=False))
         f.close()
@@ -116,10 +143,63 @@ def sum_of_size():
     return size_to_units(s), len(a)
 
 
-print(sum_of_size())
+def get_additional_details(url, converse=True):
+    """
+    """
+    prefix = 'http://incompetech.com'
+#    split_by = '/music/royalty-free/mp3-royaltyfree/'
+#    middle = split_by
+    try: webpage = urlreq.urlopen(prefix + url).read().decode('utf-8')
+    except Exception as e:
+        print(e, 'while doing', url)
+        return -1
+    splitted = webpage.split('musictitle')
+    if len(splitted) != 2:
+        print('When getting additional details, I encounterd a problem. len(splitted) =', len(splitted), 'but should be 2')
+    splitted = splitted[1].split('btn btn-success btn-small')[0]
+    #print(splitted)
+    podatki = dict()
+    try:
+        podatki['Genre'] = splitted.split('Genre:')[1].split('<')[1].split('>')[1].strip()
+        if 'Collection' in splitted:
+            podatki['Collection'] = splitted.split('Collection:')[1].split('<')[1].split('>')[1].strip()
+        podatki['Duration'] = splitted.split('Time:')[1].split('<')[1].split('>')[1].strip()
+        podatki['Duration_seconds'] = mm_ss_to_s(podatki['Duration'])
+        podatki['BPM'] = splitted.split('Time:')[1].split('BPM')[0].split('>')[2].strip()
+        if 'Instruments' in splitted:
+            podatki['Instruments'] = \
+                splitted.split('Instruments:')[1].split('<')[0].strip().split(', ')
+        else:
+            podatki['Instruments'] = []
+    except Exception as e:
+        print(e)
+        print(url)
+        print(1/0)
+    return podatki
 
-if __nane__ == '__main__': 
-    download_all_songs('foldername')
+def filter(pogoj):
+    f = open('what_I_have.yaml', 'r')
+    seznam = yaml.load(f.read())
+    f.close()
+
+    for i in seznam:
+        if pogoj(seznam[i]):
+            print(seznam[i]['name'])
+
+def voice(item):
+    return 'Voice' in item['Instruments']
+
+filter(voice)
+
+if 0:
+    print(sum_of_size())
+    print(get_additional_details("/music/royalty-free/index.html?isrc=USUAN1500039&Search=Search"))
+
+if __name__ == '__main__' and 0:
+    f = open('foldername.yaml')
+    foldername = yaml.load(f.read())['foldername']
+    f.close()
+    download_all_songs(foldername)
 
 if False:
     url = 'http://incompetech.com/music/royalty-free/index.html?isrc=USUAN1500013&Search=Search'
@@ -137,4 +217,9 @@ if False:
             print(prev)
         prev = tmp
 
-#get_mp3_from_url(url, '')
+"""
+When multiple musics have the same ID everything is fucked up.
+Multple mp3s are on the same page.
+Multiple song details are on the same page.
+...
+"""
